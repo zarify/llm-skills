@@ -1,4 +1,3 @@
-````skill
 ---
 name: h5p-widget
 description: Guidance for developing custom H5P learning exercises in Moodle with UDL, PRIMM, and WA curriculum alignment.
@@ -16,7 +15,7 @@ Create engaging, interactive learning experiences for students using H5P content
 - Pedagogically sound and aligned with learning objectives
 - Accessible and mobile-responsive
 - Compatible with Moodle's H5P integration
-- Gradeable where appropriate (xAPI/SCORM compliant)
+- Gradeable where appropriate (xAPI-based tracking/grading in Moodle)
 
 ## Pedagogical Frameworks
 
@@ -131,9 +130,9 @@ Curriculum Integration Workflow:
 ## Technology Stack
 
 - H5P Framework: HTML5-based interactive content creation
-- Target Platform: Moodle LMS with H5P plugin
+- Target Platform: Moodle LMS (core H5P integration / H5P activity)
 - Languages: JavaScript, HTML, CSS, JSON
-- Standards: xAPI (Experience API), SCORM when applicable
+- Standards: xAPI (Experience API)
 
 ## H5P Content Structure
 
@@ -205,11 +204,10 @@ content-type-name/
 
 ## xAPI Integration
 
-When creating assessments, ensure proper xAPI statements are sent:
-- attempted: User started the activity
-- answered: User submitted a response
-- completed: User finished the activity
-- scored: Activity includes a gradeable score
+When creating assessments, ensure proper xAPI statements are sent and interpreted correctly:
+- attempted/interacted: Useful engagement telemetry from H5P content
+- answered/completed: Core grading-related statements for most Moodle H5P attempt tracking workflows
+- score/result: Sent as result data on answered/completed statements (not as a separate "scored" verb)
 
 ## Testing Checklist
 
@@ -218,7 +216,7 @@ Before deploying to Moodle:
 - [ ] All interactions work as expected
 - [ ] Mobile responsiveness verified
 - [ ] Accessibility tested (keyboard, screen reader)
-- [ ] xAPI events fire correctly
+- [ ] xAPI statements include expected verbs and result payloads (especially answered/completed + score)
 - [ ] Scores report to gradebook (if applicable)
 - [ ] Content exports/imports as .h5p file
 - [ ] Multi-language support (if needed)
@@ -272,7 +270,13 @@ PowerShell (Windows):
 ```powershell
 # From the package root (where h5p.json lives)
 $h5p = Get-Content "h5p.json" -Raw | ConvertFrom-Json
-$deps = $h5p.preloadedDependencies | ForEach-Object { "$($_.machineName)-$($_.majorVersion).$($_.minorVersion)" }
+$deps = @()
+foreach ($key in @('preloadedDependencies', 'dynamicDependencies')) {
+   foreach ($d in @($h5p.$key)) {
+      $deps += "$($d.machineName)-$($d.majorVersion).$($d.minorVersion)"
+   }
+}
+$deps = $deps | Sort-Object -Unique
 $missing = $deps | Where-Object { -not (Test-Path $_) }
 if ($missing) { Write-Error "Missing dependency folders: $($missing -join ', ')"; exit 1 }
 Write-Host "Dependency preflight passed"
@@ -286,8 +290,10 @@ python - <<'PY'
 import json, os, sys
 deps = []
 data = json.load(open('h5p.json'))
-for d in data.get('preloadedDependencies', []):
-   deps.append(f"{d['machineName']}-{d['majorVersion']}.{d['minorVersion']}")
+for key in ('preloadedDependencies', 'dynamicDependencies'):
+   for d in data.get(key, []):
+      deps.append(f"{d['machineName']}-{d['majorVersion']}.{d['minorVersion']}")
+deps = sorted(set(deps))
 missing = [d for d in deps if not os.path.isdir(d)]
 if missing:
    print("Missing dependency folders: " + ", ".join(missing))
@@ -305,7 +311,13 @@ PowerShell (Windows):
 ```powershell
 # From the package root (where h5p.json lives)
 $h5p = Get-Content "h5p.json" -Raw | ConvertFrom-Json
-$deps = $h5p.preloadedDependencies | ForEach-Object { "$($_.machineName)-$($_.majorVersion).$($_.minorVersion)" }
+$deps = @()
+foreach ($key in @('preloadedDependencies', 'dynamicDependencies')) {
+   foreach ($d in @($h5p.$key)) {
+      $deps += "$($d.machineName)-$($d.majorVersion).$($d.minorVersion)"
+   }
+}
+$deps = $deps | Sort-Object -Unique
 $missing = @()
 foreach ($dep in $deps) {
    $libraryJson = Join-Path $dep "library.json"
@@ -322,7 +334,11 @@ macOS/Linux:
 python - <<'PY'
 import json, os, sys
 data = json.load(open('h5p.json'))
-deps = [f"{d['machineName']}-{d['majorVersion']}.{d['minorVersion']}" for d in data.get('preloadedDependencies', [])]
+deps = []
+for key in ('preloadedDependencies', 'dynamicDependencies'):
+   for d in data.get(key, []):
+   deps.append(f"{d['machineName']}-{d['majorVersion']}.{d['minorVersion']}")
+deps = sorted(set(deps))
 missing = [os.path.join(d, 'library.json') for d in deps if not os.path.isfile(os.path.join(d, 'library.json'))]
 if missing:
       print("Missing library.json: " + ", ".join(missing))
@@ -360,7 +376,14 @@ function Get-PathsFromJson($obj) {
 }
 
 $content = Get-Content "content\content.json" -Raw | ConvertFrom-Json
-$paths = Get-PathsFromJson $content | Sort-Object -Unique
+$paths = Get-PathsFromJson $content |
+   Where-Object {
+      $_ -is [string] -and
+      $_ -notmatch '^(?:[a-z][a-z0-9+.-]*:)?//' -and
+      $_ -notmatch '^data:' -and
+      -not [System.IO.Path]::IsPathRooted($_)
+   } |
+   Sort-Object -Unique
 $missing = $paths | Where-Object { -not (Test-Path (Join-Path "content" $_)) }
 if ($missing) { Write-Error "Missing content assets: $($missing -join ', ')"; exit 1 }
 Write-Host "Content asset reference check passed"
@@ -383,7 +406,19 @@ def walk(obj):
                   yield from walk(item)
 
 data = json.load(open('content/content.json'))
-paths = sorted(set(walk(data)))
+def is_local_content_path(path):
+   if not isinstance(path, str):
+      return False
+   path = path.strip()
+   if path == '':
+      return False
+   if path.startswith(('http://', 'https://', '//', 'data:')):
+      return False
+   if os.path.isabs(path):
+      return False
+   return True
+
+paths = sorted({p for p in walk(data) if is_local_content_path(p)})
 missing = [p for p in paths if not os.path.exists(os.path.join('content', p))]
 if missing:
       print("Missing content assets: " + ", ".join(missing))
@@ -415,7 +450,13 @@ Get-Content "content\content.json" -Raw | ConvertFrom-Json | Out-Null
 
 # Dependency folders exist
 $h5p = Get-Content "h5p.json" -Raw | ConvertFrom-Json
-$deps = $h5p.preloadedDependencies | ForEach-Object { "$($_.machineName)-$($_.majorVersion).$($_.minorVersion)" }
+$deps = @()
+foreach ($key in @('preloadedDependencies', 'dynamicDependencies')) {
+   foreach ($d in @($h5p.$key)) {
+      $deps += "$($d.machineName)-$($d.majorVersion).$($d.minorVersion)"
+   }
+}
+$deps = $deps | Sort-Object -Unique
 $missing = $deps | Where-Object { -not (Test-Path $_) }
 if ($missing) { Write-Error "Missing dependency folders: $($missing -join ', ')"; exit 1 }
 
@@ -449,7 +490,14 @@ function Get-PathsFromJson($obj) {
 }
 
 $content = Get-Content "content\content.json" -Raw | ConvertFrom-Json
-$paths = Get-PathsFromJson $content | Sort-Object -Unique
+$paths = Get-PathsFromJson $content |
+   Where-Object {
+      $_ -is [string] -and
+      $_ -notmatch '^(?:[a-z][a-z0-9+.-]*:)?//' -and
+      $_ -notmatch '^data:' -and
+      -not [System.IO.Path]::IsPathRooted($_)
+   } |
+   Sort-Object -Unique
 $missing = $paths | Where-Object { -not (Test-Path (Join-Path "content" $_)) }
 if ($missing) { Write-Error "Missing content assets: $($missing -join ', ')"; exit 1 }
 
@@ -478,7 +526,11 @@ with open('h5p.json') as f:
 with open('content/content.json') as f:
       content = json.load(f)
 
-deps = [f"{d['machineName']}-{d['majorVersion']}.{d['minorVersion']}" for d in h5p.get('preloadedDependencies', [])]
+deps = []
+for key in ('preloadedDependencies', 'dynamicDependencies'):
+   for d in h5p.get(key, []):
+      deps.append(f"{d['machineName']}-{d['majorVersion']}.{d['minorVersion']}")
+deps = sorted(set(deps))
 missing_deps = [d for d in deps if not os.path.isdir(d)]
 if missing_deps:
       fail('Missing dependency folders: ' + ', '.join(missing_deps))
@@ -497,7 +549,19 @@ def walk(obj):
             for item in obj:
                   yield from walk(item)
 
-paths = sorted(set(walk(content)))
+def is_local_content_path(path):
+   if not isinstance(path, str):
+      return False
+   path = path.strip()
+   if path == '':
+      return False
+   if path.startswith(('http://', 'https://', '//', 'data:')):
+      return False
+   if os.path.isabs(path):
+      return False
+   return True
+
+paths = sorted({p for p in walk(content) if is_local_content_path(p)})
 missing_assets = [p for p in paths if not os.path.exists(os.path.join('content', p))]
 if missing_assets:
       fail('Missing content assets: ' + ', '.join(missing_assets))
@@ -512,9 +576,10 @@ PY
     - Ensure the package root contains h5p.json and content/content.json
     - Include each library folder at the root (e.g., H5P.DragQuestion-1.13/)
     - Do not wrap the package contents in an extra top-level folder
+   - Build from a clean staging directory so unrelated files are not included
     - Create the archive:
-       - Windows (PowerShell): `Compress-Archive -Path .\* -DestinationPath .\my-content.h5p`
-       - macOS/Linux: `zip -r my-content.h5p .`
+      - Windows (PowerShell): `$libs = Get-ChildItem -Directory | Where-Object { Test-Path (Join-Path $_.FullName 'library.json') } | Select-Object -ExpandProperty Name; Compress-Archive -Path @('h5p.json','content') + $libs -DestinationPath .\my-content.zip -Force; Rename-Item .\my-content.zip .\my-content.h5p -Force`
+      - macOS/Linux: `libs=$(for d in */; do [ -f "${d}library.json" ] && printf '%s ' "${d%/}"; done); zip -r my-content.h5p h5p.json content $libs`
 2. Test in Staging: Upload to test Moodle instance
 3. Student Testing: Have sample users test functionality
 4. Production Deploy: Upload to production Moodle
@@ -525,6 +590,8 @@ PY
 - H5P Documentation: https://h5p.org/documentation
 - H5P Core API: https://h5p.org/documentation/api/H5P.html
 - Moodle H5P Documentation: https://docs.moodle.org/en/H5P
+- H5P package/spec reference: https://github.com/h5p/h5p-php-library/blob/main/doc/spec_en.html
+- Moodle H5P xAPI handling (source): https://github.com/moodle/moodle/blob/main/mod/h5pactivity/classes/xapi/handler.php
 - xAPI Specification: https://github.com/adlnet/xAPI-Spec
 - H5P GitHub Repository: https://github.com/h5p
 
@@ -550,7 +617,7 @@ Organize content by subject area or type:
 ## Support and Troubleshooting
 
 Common issues:
-- Content not displaying: Check Moodle H5P plugin version compatibility
+- Content not displaying: Check Moodle core H5P library compatibility and installed library versions
 - Scores not recording: Verify xAPI configuration in Moodle
 - Mobile issues: Test responsive breakpoints
 - Slow loading: Optimize asset sizes
@@ -565,7 +632,6 @@ When adding new content types or experiments:
 
 ---
 
-Last Updated: February 5, 2026
+Last Updated: February 20, 2026
 Moodle Version: 4.5
-H5P Plugin Version: 1.20+ (H5P Core API 1.23)
-````
+H5P Library Baseline: Verify installed content type/library versions in Moodle before deployment

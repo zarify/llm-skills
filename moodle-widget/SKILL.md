@@ -1,4 +1,9 @@
-# SKILL: Moodle “Widget” (embeddable HTML/CSS/JS)
+---
+name: moodle-html-widget
+description: Tool for building self-contained interactive HTML/CSS/JS widgets that can be pasted into Moodle Page resources without iframes.
+---
+
+# Moodle “Widget” (embeddable HTML/CSS/JS)
 
 This guide is for building a **self-contained interactive widget** that can be pasted into a **Moodle Page resource** (not an iframe).
 
@@ -13,8 +18,8 @@ This guide is for building a **self-contained interactive widget** that can be p
 
 ## Key constraints in Moodle Page content
 
-- Your HTML is often inserted *inside the body of Moodle’s page*.
-- `<style>` tags may be stripped or ignored by the editor/sanitiser.
+- Your HTML is always inserted *inside the body of Moodle’s page*.
+- `<style>` and `<script>` handling depends on site policy, editor configuration, and trust settings; do not assume they will be preserved for all roles/contexts.
 - `<head>`, `<html>`, `<body>` wrappers are not appropriate.
 - IDs/classes can collide with other content (including other copies of your widget).
 
@@ -25,7 +30,6 @@ This guide is for building a **self-contained interactive widget** that can be p
 Wrap everything in a root element with:
 
 - a **unique class** (namespaced), e.g. `.mw-binary-demo`
-- an **optional unique instance id**, generated at runtime
 
 Example:
 
@@ -46,13 +50,14 @@ Do:
 
 ### 3) Inject CSS via JavaScript (instead of `<style>`)
 
-Because Moodle may not allow `<style>` in Page content, inject a `<style>` element into `document.head` from JavaScript.
+Because many Moodle configurations clean or rewrite inline page HTML, inject a `<style>` element into `document.head` from JavaScript instead of relying on pasted `<style>` blocks.
 
 Rules:
 
 - Use a **stable style element id** so you inject once:
   - `id="mw-binary-demo-styles"`
 - Keep CSS **minimal** and **scoped**.
+- Ensure the widget still has readable fallback HTML if scripts are blocked.
 
 ### 4) Avoid global variables and avoid relying on global IDs
 
@@ -80,6 +85,7 @@ Write the script so it can initialise **every** matching widget on the page:
 - [ ] No global CSS selectors (`body`, `button`, `table`, `*`, etc.)
 - [ ] CSS is injected from JS and scoped to the widget class
 - [ ] JS initialises per-widget container (supports multiple copies)
+- [ ] JS init is idempotent (won’t double-bind handlers if script appears multiple times)
 - [ ] All DOM lookups are relative to the container
 - [ ] Accessible labels (`aria-live`, descriptive button text)
 - [ ] Works if pasted into a larger page with other content
@@ -123,6 +129,9 @@ Paste and then customise.
   }
 
   function initWidget(container) {
+    if (!container || container.getAttribute('data-mw-initialized') === '1') return;
+    container.setAttribute('data-mw-initialized', '1');
+
     var btn = container.querySelector('[data-action="random"]');
     var output = container.querySelector('[data-role="output"]');
     var work = container.querySelector('[data-role="work"]');
@@ -137,15 +146,46 @@ Paste and then customise.
     render();
   }
 
-  injectStylesOnce();
-  var widgets = document.querySelectorAll(ROOT_SELECTOR);
-  for (var i = 0; i < widgets.length; i++) initWidget(widgets[i]);
+  function initAll() {
+    injectStylesOnce();
+    var widgets = document.querySelectorAll(ROOT_SELECTOR);
+    for (var i = 0; i < widgets.length; i++) initWidget(widgets[i]);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initAll);
+  } else {
+    initAll();
+  }
 })();
 </script>
 ```
 
 ## Notes / gotchas
 
-- If Moodle strips your `<script>`, you’ll see the static HTML only. That’s a site policy/role capability issue, not a code issue.
+- If Moodle strips your `<script>`, you’ll see the static HTML only. This is usually a site policy/role capability issue (for example trusted content settings), not a widget logic bug.
 - If you *must* use IDs, generate them per instance and apply them inside `initWidget(container)`.
 - Prefer `textContent` over `innerHTML` unless you’re deliberately rendering HTML.
+
+## Runtime verification (quick test)
+
+After pasting into a Moodle Page, verify behavior in this order:
+
+1. **Single instance works**
+  - Confirm button clicks update only that widget’s output/work area.
+2. **Duplicate instance isolation**
+  - Paste a second copy on the same page.
+  - Confirm each widget updates independently.
+3. **No double-init side effects**
+  - Click one widget button once and verify output changes once (not twice).
+4. **Graceful failure when scripts are blocked**
+  - If possible, test with a non-trusted role; confirm static fallback content remains readable.
+
+## Technical references
+
+- Moodle Page editor options in core (`trusttext` disabled by default for Page content):
+  - `mod/page/locallib.php` (`page_get_editor_options`)
+- Trusted content capability + setting behavior:
+  - `lib/weblib.php` (`trusttext_trusted`, `trusttext_active`)
+  - `lib/db/access.php` (`moodle/site:trustcontent`)
+  - `lang/en/admin.php` (`enabletrusttext` description)
