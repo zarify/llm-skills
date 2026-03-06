@@ -1,5 +1,5 @@
 ---
-name: moodle-html-widget
+name: moodle-widget
 description: Tool for building self-contained interactive HTML widgets that can be pasted into Moodle Page resources without iframes.
 ---
 
