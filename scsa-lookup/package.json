@@ -1,0 +1,9 @@
+{
+  "name": "scsa-curriculum-helper",
+  "version": "1.0.0",
+  "description": "SCSA (WA) curriculum lookup tool",
+  "main": "scsa-helper.cjs",
+  "dependencies": {
+    "better-sqlite3": "^11.0.0"
+  }
+}
