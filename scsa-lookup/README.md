@@ -14,28 +14,6 @@ scsa/
 ├── README.md                 # This file
 ├── package.json              # Node.js dependencies (better-sqlite3)
 ├── node_modules/             # Installed dependencies
-├── raw/                      # Source documents (read-only)
-│   ├── curriculum/           # 51 DOCX/PDF files (S&S, Achievement, YLD, ABLEWA)
-│   ├── general-capabilites/  # 6 PDF files
-│   ├── glossary/             # 4 DOCX files
-│   ├── principles/           # 2 TXT files
-│   └── judging-standards/    # 113 DOCX files
-└── scripts/                  # Python extraction & loading pipeline
-    ├── requirements.txt      # Python dependencies
-    ├── init_db.py            # Database schema creation + seed data
-    ├── load_db.py            # Master loader (runs all parsers → DB)
-    ├── extract_docx.py       # DOCX extraction framework
-    ├── extract_pdf.py        # PDF extraction framework
-    ├── extract_txt.py        # TXT extraction framework
-    └── parsers/              # Per-document-type parsers
-        ├── scope_sequence.py
-        ├── achievement_standards.py
-        ├── year_level_descriptions.py
-        ├── general_capabilities.py
-        ├── glossary.py
-        ├── judging_standards.py
-        ├── principles.py
-        └── ablewa.py
 ```
 
 ## Database Schema
@@ -65,37 +43,6 @@ scsa/
 - `achievement_fts` — Full-text search on achievement standards
 - `glossary_fts` — Full-text search on glossary terms
 
-## Rebuilding the Database
-
-```bash
-cd scsa/
-
-# Install Python dependencies (first time only)
-pip install -r scripts/requirements.txt
-
-# Install Node.js dependencies (first time only)
-npm install
-
-# Rebuild the entire database from raw documents
-python scripts/load_db.py --reset
-```
-
-The `--reset` flag reinitialises the schema before loading. Without it, existing data is cleared and reloaded.
-
-## Adding New Documents
-
-1. Place new DOCX/PDF/TXT files in the appropriate `raw/` subdirectory
-2. If the document type has an existing parser, it will be picked up automatically on next `load_db.py` run
-3. If it's a new document format, create a parser in `scripts/parsers/`
-4. Run `python scripts/load_db.py --reset` to rebuild
-
-## Parser Details
-
-Each parser follows the pattern:
-- Takes a file path or directory as input
-- Returns a list of dicts matching the target DB table schema
-- Can be run standalone for testing: `python scripts/parsers/<parser>.py <file>`
-
 ### Known Limitations
 
 - **Literacy capability** has a different PDF structure from other capabilities and uses text-based extraction (less precise than table-based)
@@ -107,9 +54,5 @@ Each parser follows the pattern:
 
 ## Technology Stack
 
-- **Python 3.11+** — Extraction and parsing
-  - `python-docx` — DOCX reading
-  - `pdfplumber` — PDF reading
-  - `sqlite3` (stdlib) — Database operations
 - **Node.js** — CLI interface
   - `better-sqlite3` — SQLite queries
